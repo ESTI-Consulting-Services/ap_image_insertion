@@ -1,6 +1,6 @@
 # insert_ap_images.py
 
-A Python utility for inserting access point (AP) images into Ekahau ESX project files.
+A Python utility for inserting access point (AP) images into Ekahau AI Pro ESX project files.
 
 ## Overview
 
@@ -9,7 +9,7 @@ This script reverses the AP image extraction process by reading AP images from a
 ## Features
 
 - **Format A Support**: Reads images from `AP-Images/<FloorName>/APName.png` structure
-- **One Note Per Image**: Creates a separate note for each image (Rule A)
+- **One Note Per Image**: Creates a separate note for each image
 - **Metadata Management**: Automatically updates `images.json` with image metadata
 - **Audit Trail**: Sets creator information and timestamps on created notes
 - **Safe Processing**: Validates floor and AP names before insertion
@@ -57,10 +57,10 @@ AP-Images/
     └── APName-1.png
 ```
 
-Floor names must match those defined in the ESX project's `floorPlans.json`.
+Floor names must exactly match those defined in the Ekahau project.
 
 ## Notes
 
-- You may use the same path for `SRC_ESX` and `DEST_ESX` to overwrite the original project (keep a backup)
+- You may use the same path for `SRC_ESX` and `DEST_ESX` to overwrite the original project
 - Existing notes on APs are preserved; only new notes are added
 - Images with unmatched floor or AP names are reported but not inserted
