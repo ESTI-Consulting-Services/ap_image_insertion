@@ -4,16 +4,7 @@ A Python utility for inserting access point (AP) images into Ekahau AI Pro ESX p
 
 ## Overview
 
-This script reverses the AP image extraction process used by Francios Verges(https://github.com/francoisverges/semfio-ekahau/blob/master/extract-AP-Images/extract-AP-images.py) by reading AP images from a directory structure and embedding them into Ekahau project files as notes. Each image becomes a separate note attached to the corresponding AP.
-
-## Features
-
-- **Format A Support**: Reads images from `AP-Images/<FloorName>/APName.png` structure
-- **One Note Per Image**: Creates a separate note for each image
-- **Metadata Management**: Automatically updates `images.json` with image metadata
-- **Audit Trail**: Sets creator information and timestamps on created notes
-- **Safe Processing**: Validates floor and AP names before insertion
-- **Detailed Reporting**: Lists inserted images, skipped images, and APs without images
+This script reverses the AP image extraction process used by Francios Verges(https://github.com/francoisverges/semfio-ekahau/blob/master/extract-AP-Images/extract-AP-images.py) by reading AP images from a directory structure and embedding them into Ekahau project files as notes. Each image becomes a separate note attached to the corresponding AP. It also lists inserted images, skipped images and APs without images. 
 
 ## Requirements
 
@@ -57,7 +48,7 @@ AP-Images/
     └── APName-1.png
 ```
 
-Floor names must exactly match those defined in the Ekahau project.
+Floor names and AP names must exactly match those defined in the Ekahau project.
 
 ## Notes
 
