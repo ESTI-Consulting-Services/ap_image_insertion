@@ -32,6 +32,7 @@ import pathlib
 import os
 import uuid
 import re
+import csv
 
 
 def load_json(path):
@@ -272,6 +273,52 @@ def create_new_note_for_ap(ap, notes_data, note_index):
 
     return note
 
+def sort_images_by_suffix(image_files, ap_name):
+    """
+    Sort images for one AP so that:
+      AP-Name.png      -> first
+      AP-Name-1.png     -> second
+      AP-Name-2.png     -> third
+    Falls back to alphabetical order for anything that doesn't match
+    the expected pattern (placed at the end).
+    """
+    def key(path):
+        stem = os.path.splitext(os.path.basename(path))[0]
+        if stem == ap_name:
+            return (0, 0, stem)
+        if stem.startswith(ap_name + "-"):
+            suffix = stem[len(ap_name) + 1:]
+            if suffix.isdigit():
+                return (0, int(suffix), stem)
+        return (1, 0, stem)  # unrecognized pattern -> pushed to the end
+    return sorted(image_files, key=key)
+
+
+def write_ap_image_report_csv(csv_path, accessPoints, floor_id_to_name, ap_image_counts):
+    """
+    Write a CSV with one row per placed AP and how many images were
+    inserted for it (0 if none).
+    """
+    rows = []
+    for ap in accessPoints.get("accessPoints", []):
+        name = ap.get("name")
+        loc = ap.get("location", {}) or {}
+        floor_id = loc.get("floorPlanId")
+        if not name or not floor_id:
+            continue
+        floor_label = floor_id_to_name.get(floor_id, floor_id)
+        count = ap_image_counts.get((floor_id, name), 0)
+        rows.append((floor_label, name, count))
+
+    rows.sort(key=lambda r: (r[0], r[1]))
+
+    with open(csv_path, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["Floor", "AP Name", "Images Inserted"])
+        writer.writerows(rows)
+
+    print(f"** Wrote AP image report: {csv_path}")
+
 
 # --- main --------------------------------------------------------------------
 
@@ -288,7 +335,6 @@ def main():
             "the original project file (keep a backup)."
         )
     )
-    # Positional args: source ESX, destination ESX, images directory
     parser.add_argument(
         "src_esx",
         metavar="SRC_ESX",
@@ -309,6 +355,11 @@ def main():
         action="store_true",
         help="Do not delete the extracted project folder (for debugging).",
     )
+    parser.add_argument(
+        "--report-csv",
+        default=None,
+        help="Path to write the per-AP image count CSV report (default: <dst_esx_stem>_image_report.csv)",
+    )
 
     args = parser.parse_args()
 
@@ -318,6 +369,12 @@ def main():
     project_stem = pathlib.PurePath(esx_src_path).stem
     extract_dir = os.path.abspath(project_stem)
     images_root = os.path.abspath(args.images_dir)
+
+    if args.report_csv:
+        report_csv_path = os.path.abspath(args.report_csv)
+    else:
+        dst_stem = pathlib.PurePath(output_esx).stem
+        report_csv_path = os.path.join(os.path.dirname(output_esx) or ".", f"{dst_stem}_image_report.csv")
 
     if not os.path.isfile(esx_src_path):
         raise FileNotFoundError(f"ESX file not found: {esx_src_path}")
@@ -347,14 +404,13 @@ def main():
     images_data = init_images_data(images_json_path)
 
     floor_name_to_id = build_floor_name_to_id(floorPlans)
-    # NEW: reverse lookup for pretty printing
-    floor_id_to_name = {v: k for k, v in floor_name_to_id.items()}  # NEW
+    floor_id_to_name = {v: k for k, v in floor_name_to_id.items()}
 
     ap_index = build_ap_index(accessPoints)
     note_index = build_note_index(notes)
 
     print(f"** Scanning images in: {images_root}")
-    ap_images, skipped_images_from_floors = collect_images(images_root, floor_name_to_id)  # NEW
+    ap_images, skipped_images_from_floors = collect_images(images_root, floor_name_to_id)
 
     if not ap_images and not skipped_images_from_floors:
         print("No AP images found to insert. Exiting.")
@@ -365,46 +421,46 @@ def main():
     inserted_count = 0
     skipped_count = 0
 
-    # NEW: Track detailed info
-    not_inserted_images = list(skipped_images_from_floors)  # images that couldn't be matched to any floor
+    not_inserted_images = list(skipped_images_from_floors)
     ap_keys_with_images_inserted = set()
+    ap_image_counts = {}  # NEW: (floor_id, ap_name) -> number of images inserted
 
     for (floor_id, ap_name), image_files in ap_images.items():
         ap = ap_index.get((floor_id, ap_name))
         if not ap:
             print(f"WARNING: No AP named '{ap_name}' on floor id '{floor_id}', skipping its images.")
             skipped_count += len(image_files)
-            not_inserted_images.extend(image_files)  # NEW: record these images as not inserted
+            not_inserted_images.extend(image_files)
             continue
 
+        # NEW: sort so AP-Name.png, AP-Name-1.png, AP-Name-2.png insert in that order
+        image_files = sort_images_by_suffix(image_files, ap_name)
+
         for img_path in image_files:
-            # Create a brand-new note for this image
             note = create_new_note_for_ap(ap, notes, note_index)
 
             img_id = str(uuid.uuid4())
-            note["imageIds"] = [img_id]   # exactly one image per note
+            note["imageIds"] = [img_id]
 
             dest_filename = f"image-{img_id}"
             dest_full_path = os.path.join(extract_dir, dest_filename)
 
-            # Write raw image file into project root
             with open(img_path, "rb") as src_f, open(dest_full_path, "wb") as dst_f:
                 dst_f.write(src_f.read())
 
-            # Add metadata entry into images.json
             add_image_metadata(images_data, img_id, img_path)
 
             inserted_count += 1
 
-        ap_keys_with_images_inserted.add((floor_id, ap_name))  # NEW
-        print(f"   AP '{ap_name}' (floorId={floor_id}): created {len(image_files)} note(s) with images.")
+        ap_keys_with_images_inserted.add((floor_id, ap_name))
+        ap_image_counts[(floor_id, ap_name)] = len(image_files)  # NEW
+        print(f"   AP '{ap_name}' (floorId={floor_id}): created {len(image_files)} note(s) with images, "
+              f"in order: {[os.path.basename(p) for p in image_files]}")
 
-    # Save modified JSON files
     save_json(access_points_path, accessPoints)
     save_json(notes_path, notes)
     save_json(images_json_path, images_data)
 
-    # Repack into the destination ESX provided on the command line
     print(f"** Repacking project into: {output_esx}")
     repack_project(extract_dir, output_esx)
 
@@ -414,7 +470,6 @@ def main():
 
     print(f"** Done. Inserted {inserted_count} image(s), skipped {skipped_count} due to missing APs.")
 
-    # NEW: Report images that were not inserted
     if not_inserted_images:
         print(f"\n** Images that were NOT inserted ({len(not_inserted_images)}):")
         for img in sorted(set(not_inserted_images)):
@@ -423,14 +478,12 @@ def main():
     else:
         print("\n** All image files in valid floors were successfully inserted.")
 
-    # NEW: Report APs in Ekahau that did not get any images
     aps_without_images = []
     for ap in accessPoints.get("accessPoints", []):
         name = ap.get("name")
         loc = ap.get("location", {}) or {}
         floor_id = loc.get("floorPlanId")
         if not name or not floor_id:
-            # Skip APs that are not placed on a floor or have no name
             continue
         key = (floor_id, name)
         if key not in ap_keys_with_images_inserted:
@@ -443,6 +496,9 @@ def main():
             print(f"   Floor '{floor_label}' AP '{ap_name}'")
     else:
         print("   Every placed AP (with floorPlanId) received at least one image.")
+
+    # NEW: write the CSV report
+    write_ap_image_report_csv(report_csv_path, accessPoints, floor_id_to_name, ap_image_counts)
 
 
 if __name__ == "__main__":
